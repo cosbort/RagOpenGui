@@ -74,10 +74,11 @@ class ExcelLoader:
                 if df[col].dtype != 'object':
                     df[col] = df[col].astype(str)
             
-            # Processa ogni riga come un documento separato
+            # 1. Crea un documento per ogni riga
             for idx, row in df.iterrows():
                 # Crea un testo rappresentativo della riga
                 row_text = f"Scheda: {sheet_name}\n"
+                row_text += f"Riga: {idx+1}\n"  # Aggiungi il numero di riga (1-based per leggibilità)
                 
                 # Aggiungi ogni colonna e valore
                 for col, value in row.items():
@@ -88,13 +89,42 @@ class ExcelLoader:
                     "page_content": row_text,
                     "metadata": {
                         "source": self.file_path,
-                        "sheet": sheet_name,
-                        "row_index": idx,
+                        "sheet_name": sheet_name,  # Usa sheet_name invece di sheet
+                        "row_number": idx+1,       # Usa row_number invece di row_index
                         **{col: value for col, value in row.items()}
                     }
                 }
                 
                 documents.append(document)
+            
+            # 2. Crea un documento di riepilogo per la scheda (statistiche)
+            try:
+                # Calcola statistiche per colonne numeriche
+                numeric_cols = df.select_dtypes(include=['number']).columns
+                if len(numeric_cols) > 0:
+                    stats_text = f"Scheda: {sheet_name}\nRiepilogo statistico:\n"
+                    
+                    # Aggiungi statistiche per ogni colonna numerica
+                    for col in numeric_cols:
+                        stats_text += f"\nStatistiche per {col}:\n"
+                        stats_text += f"- Totale: {df[col].sum()}\n"
+                        stats_text += f"- Media: {df[col].mean()}\n"
+                        stats_text += f"- Massimo: {df[col].max()}\n"
+                        stats_text += f"- Minimo: {df[col].min()}\n"
+                    
+                    # Crea documento di riepilogo
+                    summary_doc = {
+                        "page_content": stats_text,
+                        "metadata": {
+                            "source": self.file_path,
+                            "sheet_name": sheet_name,
+                            "document_type": "summary",
+                            "row_count": len(df)
+                        }
+                    }
+                    documents.append(summary_doc)
+            except Exception as e:
+                logger.warning(f"Impossibile generare statistiche per la scheda {sheet_name}: {str(e)}")
         
         logger.info(f"Creati {len(documents)} documenti dalle schede Excel")
         return documents

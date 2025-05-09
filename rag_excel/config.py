@@ -27,11 +27,11 @@ EXCEL_FILE_PATH = os.getenv("EXCEL_FILE_PATH", str(BASE_DIR / "data" / "dati.xls
 
 # Configurazione Vector Store
 VECTOR_STORE_PATH = os.getenv("VECTOR_STORE_PATH", str(BASE_DIR / "data" / "vector_store"))
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "256"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "64"))
 
 # Configurazione RAG
-MAX_RESULTS = int(os.getenv("MAX_RESULTS", "12"))  # Aumentato a 12 per maggiore recall
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "15"))  # Aumentato a 15 per più contesto
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
 
 # Configurazione Logging
@@ -58,8 +58,8 @@ def init_logging(name: str) -> logging.Logger:
     return logger
 
 # Configurazione HTTP Client (per rag_excel_function.py)
-HTTPX_TIMEOUT = float(os.getenv("HTTPX_TIMEOUT", "30.0"))
-HTTPX_RETRIES = int(os.getenv("HTTPX_RETRIES", "3"))
+HTTPX_TIMEOUT = float(os.getenv("HTTPX_TIMEOUT", "60.0"))
+HTTPX_RETRIES = int(os.getenv("HTTPX_RETRIES", "5"))
 
 # URL Server RAG (per rag_excel_function.py)
 RAG_EXCEL_URL = f"http://{API_HOST}:{API_PORT}"
