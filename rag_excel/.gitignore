@@ -1,0 +1,35 @@
+# Ambienti virtuali
+.venv/
+.venv_wsl/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# File di ambiente
+.env
+
+# File di log
+*.log
+
+# File di cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# File di vector store
+data/vector_store/
+**/vector_store/
+
+# File Excel
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+
+# Cartelle di IDE
+.idea/
+.vscode/
