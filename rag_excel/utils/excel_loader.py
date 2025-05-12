@@ -55,78 +55,58 @@ class ExcelLoader:
     
     def get_documents(self) -> List[Dict[str, Any]]:
         """
-        Converte i dataframes in documenti per il RAG.
-        
+        Converte i dataframes in documenti per il RAG, 
+        utilizzando una rappresentazione Markdown per ogni foglio.
+
         Returns:
-            Lista di documenti con metadati
+            Lista di documenti (uno per foglio) con metadati.
         """
         documents = []
-        
+
         # Se i dataframes non sono stati caricati, caricali
         if not self.dataframes:
             self.load()
-        
+
         for sheet_name, df in self.dataframes.items():
-            logger.info(f"Conversione della scheda {sheet_name} in documenti")
-            
-            # Converti le colonne non stringa in stringhe
-            for col in df.columns:
-                if df[col].dtype != 'object':
-                    df[col] = df[col].astype(str)
-            
-            # 1. Crea un documento per ogni riga
-            for idx, row in df.iterrows():
-                # Crea un testo rappresentativo della riga
-                row_text = f"Scheda: {sheet_name}\n"
-                row_text += f"Riga: {idx+1}\n"  # Aggiungi il numero di riga (1-based per leggibilità)
+            logger.info(f"Conversione della scheda {sheet_name} in documento Markdown")
+
+            # Gestione DataFrame vuoto
+            if df.empty:
+                logger.warning(f"La scheda {sheet_name} è vuota. Salto la creazione del documento.")
+                continue
                 
-                # Aggiungi ogni colonna e valore
-                for col, value in row.items():
-                    row_text += f"{col}: {value}\n"
+            try:
+                # Converte l'intero DataFrame in una stringa Markdown
+                # index=False per non includere l'indice pandas nel markdown, 
+                # a meno che non sia significativo. Potrebbe essere utile impostarlo a True
+                # se l'indice ha un significato nel tuo foglio Excel.
+                markdown_content = df.to_markdown(index=False) 
                 
-                # Crea il documento con metadati
+                # Aggiungi un titolo per chiarezza
+                page_content = f"# Scheda: {sheet_name}\n\n{markdown_content}"
+
+                # Crea il documento con metadati essenziali
                 document = {
-                    "page_content": row_text,
+                    "page_content": page_content,
                     "metadata": {
                         "source": self.file_path,
-                        "sheet_name": sheet_name,  # Usa sheet_name invece di sheet
-                        "row_number": idx+1,       # Usa row_number invece di row_index
-                        **{col: value for col, value in row.items()}
+                        "sheet_name": sheet_name,
+                        "num_rows": len(df),
+                        "column_headers": list(df.columns) 
+                        # Aggiungi altri metadati se utili, es. un riassunto,
+                        # ma evita di includere TUTTI i dati qui.
                     }
                 }
-                
                 documents.append(document)
-            
-            # 2. Crea un documento di riepilogo per la scheda (statistiche)
-            try:
-                # Calcola statistiche per colonne numeriche
-                numeric_cols = df.select_dtypes(include=['number']).columns
-                if len(numeric_cols) > 0:
-                    stats_text = f"Scheda: {sheet_name}\nRiepilogo statistico:\n"
-                    
-                    # Aggiungi statistiche per ogni colonna numerica
-                    for col in numeric_cols:
-                        stats_text += f"\nStatistiche per {col}:\n"
-                        stats_text += f"- Totale: {df[col].sum()}\n"
-                        stats_text += f"- Media: {df[col].mean()}\n"
-                        stats_text += f"- Massimo: {df[col].max()}\n"
-                        stats_text += f"- Minimo: {df[col].min()}\n"
-                    
-                    # Crea documento di riepilogo
-                    summary_doc = {
-                        "page_content": stats_text,
-                        "metadata": {
-                            "source": self.file_path,
-                            "sheet_name": sheet_name,
-                            "document_type": "summary",
-                            "row_count": len(df)
-                        }
-                    }
-                    documents.append(summary_doc)
+                
             except Exception as e:
-                logger.warning(f"Impossibile generare statistiche per la scheda {sheet_name}: {str(e)}")
+                logger.error(f"Errore durante la conversione della scheda {sheet_name} in Markdown: {str(e)}")
+                # Si potrebbe decidere di continuare con altri fogli (continue) 
+                # o fermarsi qui (raise e) a seconda della robustezza desiderata.
+                # Al momento, logga l'errore e continua.
+                continue 
         
-        logger.info(f"Creati {len(documents)} documenti dalle schede Excel")
+        logger.info(f"Creati {len(documents)} documenti (uno per foglio) dal file Excel")
         return documents
     
     def get_sheet_names(self) -> List[str]:
