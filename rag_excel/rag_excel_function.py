@@ -117,6 +117,13 @@ class Filter:
                             answer = result.get("answer", "Nessuna risposta dal RAG.")
                             sources = result.get("sources", [])
                             
+                            # Log dettagliato delle fonti trovate
+                            logger.info(f"Contesto RAG: {len(sources)} risultati trovati.")
+                            for i, source in enumerate(sources):
+                                logger.info(f"Fonte {i+1}: Foglio: {source.get('sheet_name', 'N/D')}, "
+                                           f"Riga: {source.get('row_number', 'N/D')}, "
+                                           f"Contenuto: {source.get('content', 'N/D')}")
+                            
                             formatted_sources = "Nessuna fonte specifica."
                             if sources:
                                 formatted_sources = "\nFonti:\n" + "\n".join([
@@ -127,7 +134,8 @@ class Filter:
                             # Costruisci il contesto da aggiungere
                             rag_context = f"\n\n--- Contesto dai dati Excel (fornito dal sistema RAG) ---\nRisposta preliminare: {answer}{formatted_sources}\n--------------------------------------------------------\n\nDomanda originale: "
                             logger.info("Contesto RAG generato con successo.")
-
+                            # Log del contesto completo
+                            logger.info(f"Contesto RAG completo: {rag_context}")
                         except Exception as e:
                             logger.error(f"Errore durante l'elaborazione della risposta RAG: {str(e)}")
                             # Continua senza contesto RAG
