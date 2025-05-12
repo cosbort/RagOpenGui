@@ -223,5 +223,5 @@ def clean_for_json(obj: Any) -> Any:
 
 if __name__ == "__main__":
     logger.info(f"Avvio del server FastAPI su {API_HOST}:{API_PORT}")
-    # Usa l'IP della tua rete Wi-Fi
-    uvicorn.run(app, host="192.168.1.151", port=API_PORT)
+    # Usa le costanti importate da config
+    uvicorn.run(app, host=API_HOST, port=API_PORT)

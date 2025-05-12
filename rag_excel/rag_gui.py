@@ -25,8 +25,11 @@ sys.path.append(str(Path(__file__).resolve().parent))
 from config import (
     init_logging,
     VECTOR_STORE_PATH,
-    EXCEL_FILE_PATH
+    EXCEL_FILE_PATH,
+    OPENAI_API_KEY,
+    EMBEDDING_MODEL
 )
+from langchain_openai import OpenAIEmbeddings
 from utils.document_loader import DocumentLoader
 from utils.vector_store import VectorStoreManager
 from utils.excel_loader import ExcelLoader
@@ -89,37 +92,50 @@ def extract_embeddings_from_vector_store(vs_manager: VectorStoreManager) -> Dict
         if vs_manager.vector_store is None:
             return {"success": False, "error": "Vector store non inizializzato"}
         
-        faiss_index = vs_manager.vector_store.index
-        if not hasattr(faiss_index, "reconstruct"):
-            return {"success": False, "error": "L'indice FAISS non supporta la ricostruzione dei vettori"}
+        # Ottieni i documenti dal docstore
+        documents = list(vs_manager.vector_store.docstore._dict.values())
+        if not documents:
+            return {"success": False, "error": "Nessun documento trovato nel vector store"}
         
-        # Estrai i vettori e i documenti
+        st.info(f"Trovati {len(documents)} documenti nel vector store")
+        
+        # Crea gli embeddings per ogni documento
         embeddings = []
-        documents = []
+        document_contents = []
+        document_metadata = []
         
-        # Ottieni il numero di vettori nell'indice
-        num_vectors = faiss_index.ntotal
+        # Usa l'embedding model per generare gli embeddings
+        embedder = OpenAIEmbeddings(
+            model=EMBEDDING_MODEL,
+            openai_api_key=OPENAI_API_KEY
+        )
         
-        for i in range(num_vectors):
-            try:
-                # Ricostruisci il vettore
-                vector = faiss_index.reconstruct(i)
-                embeddings.append(vector)
-                
-                # Ottieni il documento corrispondente
-                doc_id = vs_manager.vector_store.docstore._dict.get(f"doc:{i}")
-                if doc_id:
-                    documents.append(doc_id)
-            except Exception as e:
-                continue
+        # Limita il numero di documenti per evitare troppe chiamate API
+        max_docs = min(len(documents), 100)  # Limita a 100 documenti
+        
+        with st.spinner(f"Generazione embeddings per {max_docs} documenti..."):
+            for i, doc in enumerate(documents[:max_docs]):
+                try:
+                    # Genera l'embedding per questo documento
+                    embedding = embedder.embed_query(doc.page_content[:8000])  # Limita a 8000 caratteri
+                    embeddings.append(embedding)
+                    document_contents.append(doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content)
+                    document_metadata.append(doc.metadata)
+                except Exception as e:
+                    st.warning(f"Errore durante la generazione dell'embedding per il documento {i}: {str(e)}")
+        
+        if not embeddings:
+            return {"success": False, "error": "Nessun embedding generato"}
         
         return {
             "success": True,
             "embeddings": np.array(embeddings),
-            "documents": documents,
+            "document_contents": document_contents,
+            "document_metadata": document_metadata,
             "count": len(embeddings)
         }
     except Exception as e:
+        st.error(f"Errore durante l'estrazione degli embeddings: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def reduce_dimensions(embeddings: np.ndarray, method: str = "pca") -> np.ndarray:
@@ -163,87 +179,92 @@ def visualize_embeddings(embeddings_data: Dict[str, Any], method: str = "pca") -
     
     # Riduci le dimensioni per la visualizzazione
     embeddings = embeddings_data["embeddings"]
-    documents = embeddings_data["documents"]
+    document_contents = embeddings_data.get("document_contents", [])
+    document_metadata = embeddings_data.get("document_metadata", [])
     
-    # Assicurati che il numero di embeddings e documenti sia lo stesso
-    min_length = min(len(embeddings), len(documents))
-    if min_length < len(embeddings):
-        embeddings = embeddings[:min_length]
-        st.warning(f"Numero di embeddings ridotto a {min_length} per corrispondere al numero di documenti")
-    elif min_length < len(documents):
-        documents = documents[:min_length]
-        st.warning(f"Numero di documenti ridotto a {min_length} per corrispondere al numero di embeddings")
+    # Riduci le dimensioni degli embeddings
+    reduced_data = reduce_dimensions(embeddings, method)
     
-    # Se non ci sono embeddings dopo il controllo, mostra un avviso e termina
-    if min_length == 0:
-        st.warning("Nessun embedding disponibile per la visualizzazione dopo il controllo di coerenza.")
-        return
-    
-    reduced_embeddings = reduce_dimensions(embeddings, method)
-    
-    # Se la riduzione dimensionale ha restituito un array vuoto, termina
-    if reduced_embeddings.shape[0] == 0:
-        st.error("Impossibile visualizzare gli embeddings a causa di un errore nella riduzione dimensionale.")
-        return
-    
-    # Prepara dati per il dataframe assicurandosi che tutte le liste abbiano la stessa lunghezza
-    x_values = reduced_embeddings[:, 0]
-    y_values = reduced_embeddings[:, 1]
-    
-    # Crea liste per document_type e content con gestione sicura
-    doc_types = []
-    contents = []
-    
-    for doc in documents:
-        if hasattr(doc, "metadata"):
-            doc_types.append(doc.metadata.get("document_type", "unknown"))
-        else:
-            doc_types.append("unknown")
-            
-        if hasattr(doc, "page_content"):
-            contents.append(doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content)
-        else:
-            contents.append("N/A")
-    
-    # Verifica finale che tutte le liste abbiano la stessa lunghezza
-    length = len(x_values)
-    if len(y_values) != length or len(doc_types) != length or len(contents) != length:
-        st.error(f"Errore: le liste hanno lunghezze diverse: x={len(x_values)}, y={len(y_values)}, types={len(doc_types)}, contents={len(contents)}")
+    if reduced_data is None:
+        st.error(f"Errore durante la riduzione delle dimensioni con {method.upper()}.")
         return
     
     # Crea un dataframe per la visualizzazione
     df = pd.DataFrame({
-        "x": x_values,
-        "y": y_values,
-        "document_type": doc_types,
-        "content": contents
+        "x": reduced_data[:, 0],
+        "y": reduced_data[:, 1],
     })
     
-    # Visualizza con Plotly
+    # Aggiungi informazioni sui documenti
+    if document_contents and len(document_contents) == len(df):
+        df["content"] = document_contents
+    
+    # Aggiungi metadati se disponibili
+    if document_metadata and len(document_metadata) == len(df):
+        # Estrai informazioni comuni dai metadati
+        doc_types = []
+        sources = []
+        sheet_names = []
+        
+        for meta in document_metadata:
+            doc_type = meta.get("document_type", meta.get("file_type", "unknown"))
+            source = meta.get("source", "unknown")
+            sheet = meta.get("sheet_name", "")
+            
+            doc_types.append(doc_type)
+            sources.append(Path(source).name if source != "unknown" else source)
+            sheet_names.append(sheet)
+        
+        df["tipo"] = doc_types
+        df["fonte"] = sources
+        if any(sheet_names):
+            df["scheda"] = sheet_names
+        
+        # Usa il tipo di documento come colore
+        color_column = "tipo"
+    else:
+        # Senza informazioni sui documenti, usa un colore unico
+        color_column = None
+    
+    # Crea il grafico con Plotly
+    hover_data = [col for col in df.columns if col not in ["x", "y", color_column]]
+    
     fig = px.scatter(
-        df, x="x", y="y", color="document_type", hover_data=["content"],
-        title=f"Visualizzazione degli Embeddings ({method.upper()})"
+        df,
+        x="x",
+        y="y",
+        color=color_column,
+        hover_data=hover_data,
+        title=f"Visualizzazione {method.upper()} degli Embeddings"
     )
+    
+    # Personalizza il grafico
+    fig.update_layout(
+        width=800,
+        height=600,
+        xaxis_title=f"{method.upper()} Componente 1",
+        yaxis_title=f"{method.upper()} Componente 2"
+    )
+    
+    # Mostra il grafico
     st.plotly_chart(fig, use_container_width=True)
     
-    # Statistiche
-    st.subheader("Statistiche degli Embeddings")
-    st.write(f"Numero totale di embeddings: {embeddings_data['count']}")
-    
-    # Conteggio per tipo di documento
-    doc_types = df["document_type"].value_counts().reset_index()
-    doc_types.columns = ["Tipo Documento", "Conteggio"]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("Distribuzione per tipo di documento:")
-        st.dataframe(doc_types)
-    
-    with col2:
-        fig, ax = plt.subplots()
-        ax.pie(doc_types["Conteggio"], labels=doc_types["Tipo Documento"], autopct="%1.1f%%")
-        ax.set_title("Distribuzione per tipo di documento")
-        st.pyplot(fig)
+    # Mostra statistiche sui documenti
+    if "tipo" in df.columns:
+        st.subheader("Distribuzione dei Tipi di Documenti")
+        type_counts = df["tipo"].value_counts()
+        
+        # Crea un grafico a torta
+        fig_pie = px.pie(
+            values=type_counts.values,
+            names=type_counts.index,
+            title="Tipi di Documenti"
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Mostra anche una tabella con i documenti
+        st.subheader("Documenti nel Vector Store")
+        st.dataframe(df[[col for col in df.columns if col not in ["x", "y"]]])
 
 def display_document_preview(documents: List[Dict[str, Any]]) -> None:
     """Mostra un'anteprima dei documenti processati."""
@@ -278,24 +299,24 @@ def display_document_preview(documents: List[Dict[str, Any]]) -> None:
 
 # Interfaccia principale
 def main():
-    st.title("📊 RAG Document Visualizer")
-    
-    # Sidebar
-    st.sidebar.title("Opzioni")
+    """Funzione principale dell'applicazione."""
+    st.title("RAG Document Visualizer")
+    st.write("Visualizza e gestisci i documenti nel sistema RAG.")
     
     # Crea una directory temporanea per i file caricati
     temp_dir = tempfile.mkdtemp()
     
-    # Opzioni di visualizzazione
-    view_option = st.sidebar.radio(
-        "Cosa vuoi fare?",
+    # Sidebar con opzioni
+    st.sidebar.title("Opzioni")
+    page = st.sidebar.radio(
+        "Seleziona Pagina:",
         ["Visualizza Vector Store Esistente", "Carica e Processa Nuovo Documento"]
     )
     
-    if view_option == "Visualizza Vector Store Esistente":
-        st.header("Visualizzazione Vector Store Esistente")
+    if page == "Visualizza Vector Store Esistente":
+        st.header("Vector Store Esistente")
         
-        # Verifica esistenza vector store
+        # Verifica se il vector store esiste
         vs_path = Path(VECTOR_STORE_PATH)
         index_file = vs_path / "index.faiss"
         pkl_file = vs_path / "index.pkl"
@@ -305,26 +326,52 @@ def main():
             st.info("Carica un documento per creare il vector store.")
         else:
             st.success(f"Vector store trovato in: {VECTOR_STORE_PATH}")
+            st.info(f"Percorso: {VECTOR_STORE_PATH}")
+            
+            # Mostra informazioni sul file Excel di origine
+            if Path(EXCEL_FILE_PATH).exists():
+                st.success(f"File Excel trovato: {EXCEL_FILE_PATH}")
+                st.info(f"Dimensione: {Path(EXCEL_FILE_PATH).stat().st_size / 1024:.1f} KB")
+            else:
+                st.warning(f"File Excel non trovato: {EXCEL_FILE_PATH}")
             
             # Carica il vector store
             vs_manager = load_vector_store(VECTOR_STORE_PATH)
             
             if vs_manager:
+                # Mostra informazioni sul vector store
+                st.subheader("Informazioni Vector Store")
+                
+                # Estrai documenti dal vector store
+                documents = list(vs_manager.vector_store.docstore._dict.values())
+                st.success(f"Trovati {len(documents)} documenti nel vector store")
+                
+                # Mostra un campione di documenti
+                st.subheader("Campione di Documenti")
+                sample_size = min(5, len(documents))
+                for i, doc in enumerate(documents[:sample_size]):
+                    st.markdown(f"**Documento {i+1}:**")
+                    st.markdown(f"**Contenuto:** {doc.page_content[:200]}..." if len(doc.page_content) > 200 else doc.page_content)
+                    st.markdown(f"**Metadati:** {doc.metadata}")
+                    st.markdown("---")
+                
                 # Opzioni di visualizzazione
+                st.subheader("Visualizzazione Embeddings")
                 viz_method = st.radio(
                     "Metodo di visualizzazione:",
                     ["PCA", "t-SNE"]
                 )
                 
-                # Estrai e visualizza gli embeddings
-                embeddings_data = extract_embeddings_from_vector_store(vs_manager)
-                visualize_embeddings(embeddings_data, viz_method.lower())
+                # Pulsante per generare la visualizzazione
+                if st.button("Genera Visualizzazione Embeddings"):
+                    # Estrai e visualizza gli embeddings
+                    embeddings_data = extract_embeddings_from_vector_store(vs_manager)
+                    visualize_embeddings(embeddings_data, viz_method.lower())
                 
                 # Opzione per pulire il vector store
                 if st.sidebar.button("Pulisci Vector Store"):
                     if clean_vector_store(VECTOR_STORE_PATH):
                         st.sidebar.success("Vector store pulito con successo.")
-                        st.experimental_rerun()
                     else:
                         st.sidebar.error("Errore durante la pulizia del vector store.")
     
