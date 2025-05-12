@@ -90,7 +90,7 @@ def create_vector_store() -> bool:
         logger.error(traceback.format_exc())
         return False
 
-def test_rag_system(query: str = "Qual è lo stipendio medio?") -> bool:
+def test_rag_system(query: str = "Chi è il riferimento di Gallina Alessandro?") -> bool:
     """
     Carica il vector store esistente e testa il sistema RAG con una query.
     """
