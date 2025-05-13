@@ -19,6 +19,8 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # Configurazione OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY")
+LLAMA_CLOUD_REGION = os.getenv("LLAMA_CLOUD_REGION", "eu")  # Regione predefinita: eu (Europa)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")  # Utilizzo di GPT-4o, il modello più recente
 

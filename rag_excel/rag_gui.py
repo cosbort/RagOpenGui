@@ -289,7 +289,24 @@ def display_document_preview(documents: List[Dict[str, Any]]) -> None:
             # Mostra i primi 5 documenti
             for i, doc in enumerate(docs[:5]):
                 st.markdown(f"**Documento {i+1}**")
-                st.markdown(f"**Contenuto:**\n```\n{doc['page_content'][:500]}{'...' if len(doc['page_content']) > 500 else ''}\n```")
+                
+                # Visualizza il contenuto preservando la formattazione Markdown
+                # Non usiamo blocchi di codice per il contenuto Markdown, ma lo visualizziamo direttamente
+                st.markdown("**Contenuto:**")
+                
+                # Limita la lunghezza del contenuto visualizzato
+                content_to_display = doc['page_content']
+                if len(content_to_display) > 2000:
+                    # Trova l'ultima riga completa prima del limite
+                    last_newline = content_to_display[:2000].rfind('\n')
+                    if last_newline > 0:
+                        content_to_display = content_to_display[:last_newline] + '\n\n*... contenuto troncato ...*'
+                    else:
+                        content_to_display = content_to_display[:2000] + '\n\n*... contenuto troncato ...*'
+                
+                # Visualizza il contenuto come Markdown (preserva tabelle e formattazione)
+                st.markdown(content_to_display)
+                
                 st.markdown("**Metadati:**")
                 st.json(doc["metadata"])
                 st.markdown("---")

@@ -16,11 +16,14 @@ from bs4 import BeautifulSoup
 import docx  # python-docx per file Word
 import PyPDF2  # PyPDF2 per file PDF
 
-# Importa il loader Excel esistente
+# Importa il loader Excel esistente (lo useremo ancora come fallback o per altri scopi se necessario)
 from .excel_loader import ExcelLoader
 
+# Importa LlamaParse e la configurazione
+from llama_parse import LlamaParse
+from config import LLAMA_CLOUD_API_KEY, init_logging # Assicurati che LLAMA_CLOUD_API_KEY sia in config
+
 # Importa il logger configurato
-from config import init_logging
 logger = init_logging(__name__)
 
 class DocumentLoader:
@@ -40,6 +43,7 @@ class DocumentLoader:
         self.file_type = self._detect_file_type()
         self.content = None
         self.documents = []
+        self.parsing_instructions_excel = "Questa è una tabella di dati. Estrai il contenuto in formato markdown, preservando la struttura della tabella."
         
     def _detect_file_type(self) -> str:
         """
@@ -79,9 +83,55 @@ class DocumentLoader:
         
         try:
             if self.file_type == 'excel':
-                # Usa il loader Excel esistente
-                excel_loader = ExcelLoader(self.file_path)
-                self.content = excel_loader.load()
+                if LLAMA_CLOUD_API_KEY:
+                    logger.info(f"Utilizzo di LlamaParse per il file Excel: {self.file_path}")
+                    # Inizializza LlamaParse
+                    try:
+                        # Importa la regione dalla configurazione
+                        from config import LLAMA_CLOUD_REGION
+                        
+                        logger.info(f"Inizializzazione LlamaParse con regione: {LLAMA_CLOUD_REGION}...")
+                        parser = LlamaParse(
+                            api_key=LLAMA_CLOUD_API_KEY,
+                            result_type="markdown",  # Richiede l'output in formato Markdown
+                            verbose=True,
+                            region=LLAMA_CLOUD_REGION,  # Specifica la regione (us, eu, ap)
+                            base_url=f"https://api.cloud.{LLAMA_CLOUD_REGION}.llamaindex.ai",  # URL base specifico per la regione
+                            parsing_instructions="""Analizza approfonditamente questo file Excel complesso seguendo queste linee guida:
+1. Estrai tutte le tabelle preservando la struttura originale, gli indici delle righe e le intestazioni delle colonne
+2. Identifica e preserva le relazioni tra celle, formule e riferimenti incrociati tra fogli
+3. Riconosci e mantieni la gerarchia dei dati (gruppi, sottogruppi, totali, subtotali)
+4. Estrai e interpreta eventuali grafici, evidenziando i trend e le correlazioni rappresentate
+5. Identifica e descrivi le celle con formattazione condizionale o speciale
+6. Preserva i nomi delle persone, organizzazioni, date e valori numerici significativi
+7. Riconosci e mantieni la struttura di eventuali tabelle pivot
+8. Formatta il contenuto in modo ottimale per la ricerca semantica e l'estrazione di informazioni specifiche
+9. Mantieni il contesto di ogni dato, specificando a quale foglio, sezione o categoria appartiene
+10. Evidenzia eventuali anomalie o incongruenze nei dati
+"""
+                        )
+                        
+                        # Carica e parsa il file
+                        logger.info(f"Parsing del file Excel con LlamaParse: {self.file_path}")
+                        llama_documents = parser.load_data(self.file_path)
+                        
+                        # Verifica che llama_documents non sia None e contenga effettivamente documenti
+                        if llama_documents and len(llama_documents) > 0:
+                            self.content = llama_documents # Salviamo i documenti parsati
+                            logger.info(f"File Excel parsato con successo usando LlamaParse: {len(llama_documents)} documenti generati")
+                        else:
+                            # Se non ci sono documenti, considera questo come un errore
+                            raise ValueError("Nessun documento generato da LlamaParse")
+                            
+                    except Exception as e:
+                        logger.error(f"Errore durante il parsing con LlamaParse: {str(e)}")
+                        logger.warning("Fallback al loader Excel tradizionale dopo errore di parsing.")
+                        excel_loader = ExcelLoader(self.file_path)
+                        self.content = excel_loader.load()
+                else:
+                    logger.warning("LLAMA_CLOUD_API_KEY non configurata. Fallback al loader Excel tradizionale.")
+                    excel_loader = ExcelLoader(self.file_path)
+                    self.content = excel_loader.load() # self.content sarà un dict di DataFrame
             elif self.file_type == 'word':
                 self.content = self._load_word()
             elif self.file_type == 'pdf':
@@ -174,10 +224,42 @@ class DocumentLoader:
         
         documents = []
         
+        logger.info(f"Conversione del file {self.file_type} in documenti RAG...")
+
         if self.file_type == 'excel':
-            # Usa il loader Excel esistente per i documenti
-            excel_loader = ExcelLoader(self.file_path)
-            return excel_loader.get_documents()
+            if isinstance(self.content, list) and len(self.content) > 0 and hasattr(self.content[0], 'get_content'): # Verifica se è output di LlamaParse
+                logger.info("Conversione dei documenti LlamaParse in formato RAG.")
+                for llama_doc in self.content: # self.content qui è la lista di LlamaIndex Documents
+                    # Estrai metadati rilevanti da llama_doc.metadata se necessario
+                    # e aggiungili ai tuoi metadati standard
+                    doc_metadata = {
+                        "source": self.file_path,
+                        "document_type": "excel_llamaparse",
+                        # Aggiungi altri metadati da llama_doc.metadata se utili
+                        **(llama_doc.metadata or {}) 
+                    }
+                    documents.append({
+                        "page_content": llama_doc.get_content(), # Il contenuto Markdown della tabella/sezione
+                        "metadata": doc_metadata
+                    })
+            else: # Fallback al vecchio metodo se LlamaParse non è stato usato
+                logger.info("Conversione dei DataFrame Excel (metodo tradizionale) in formato RAG.")
+                # Crea un nuovo ExcelLoader e carica il file da zero
+                excel_loader = ExcelLoader(self.file_path)
+                # Non assegnare self.content a dataframes, ma lascia che ExcelLoader carichi il file
+                try:
+                    documents.extend(excel_loader.get_documents())
+                except Exception as e:
+                    logger.error(f"Errore durante la conversione del file Excel: {str(e)}")
+                    # Aggiungi un documento di errore per informare l'utente
+                    documents.append({
+                        "page_content": f"Errore durante il caricamento del file Excel: {str(e)}",
+                        "metadata": {
+                            "source": self.file_path,
+                            "document_type": "error",
+                            "error": str(e)
+                        }
+                    })
             
         elif self.file_type == 'word':
             text = self.content.get("text", "")

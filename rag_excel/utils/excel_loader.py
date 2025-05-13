@@ -77,10 +77,9 @@ class ExcelLoader:
                 
             try:
                 # Converte l'intero DataFrame in una stringa Markdown
-                # index=False per non includere l'indice pandas nel markdown, 
-                # a meno che non sia significativo. Potrebbe essere utile impostarlo a True
-                # se l'indice ha un significato nel tuo foglio Excel.
-                markdown_content = df.to_markdown(index=False) 
+                # Includiamo l'indice (index=True) per mostrare i numeri di riga
+                # Questo è utile per riferirsi a righe specifiche nei dati
+                markdown_content = df.to_markdown(index=True) 
                 
                 # Aggiungi un titolo per chiarezza
                 page_content = f"# Scheda: {sheet_name}\n\n{markdown_content}"
