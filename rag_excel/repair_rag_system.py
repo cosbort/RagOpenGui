@@ -292,12 +292,14 @@ def test_rag_system(query: str = "Chi è il riferimento di Gallina Alessandro?")
             logger.error("Impossibile caricare il Vector Store per il test.")
             return False
         
-        # Crea il retriever con parametri ottimizzati
+        # Crea il retriever con parametri ottimizzati per Excel complessi usando MMR
         retriever = vector_store_manager.vector_store.as_retriever(
             search_kwargs={
-                "k": MAX_RESULTS,
-                "score_threshold": SIMILARITY_THRESHOLD  # Filtra risultati per rilevanza
-            }
+                "k": MAX_RESULTS * 3,  # Triplica il numero di risultati per aumentare la copertura
+                "fetch_k": MAX_RESULTS * 6,  # Recupera più documenti prima del filtraggio finale
+                "lambda_mult": 0.7  # Bilancia tra rilevanza (1.0) e diversità (0.0)
+            },
+            search_type="mmr"  # Maximum Marginal Relevance: bilancia rilevanza e diversità
         )
         
         # Crea l'LLM
